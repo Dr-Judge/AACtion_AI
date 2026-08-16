@@ -1,0 +1,12 @@
+fastapi>=0.115
+uvicorn[standard]>=0.34
+pydantic>=2.10
+pydantic-settings>=2.7
+langchain>=0.3
+langchain-google-genai>=2.0
+langchain-chroma>=0.2
+chromadb>=0.5
+mysql-connector-python>=9.1
+httpx>=0.28
+pytest>=8.3
+pytest-asyncio>=0.25
