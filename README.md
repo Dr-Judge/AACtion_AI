@@ -1,6 +1,6 @@
 # AACtion_AI — 닥터저지 판정 AI 서비스
 
-Dr-Judge(Spring) 백엔드가 호출하는 판정 AI 서비스. RAG 검색 + Gemini 추론을 담당한다.
+Dr-Judge(Spring) 백엔드가 호출하는 판정 AI 서비스. RAG 검색 + OpenAI 추론을 담당한다.
 Spring↔Python 계약 상세는 [Dr-Judge/docs/AI_SERVICE_CONTRACT.md](https://github.com/Dr-Judge/AACtion_BE/blob/develop/docs/AI_SERVICE_CONTRACT.md) 참고.
 
 ## 로컬 실행
@@ -28,16 +28,15 @@ pytest -v
 ```
 app/
 ├── core/       # 설정, 인증, 예외 — 공용
-├── llm/        # 공용 연결 팩토리 (Gemini 클라이언트, 키/타임아웃만)
+├── llm/        # 공용 연결 팩토리 (OpenAI 클라이언트, 키/타임아웃만)
 └── judgment/   # 판정 도메인 — 프롬프트, RAG 오케스트레이션
     └── rag/    # 벡터스토어, 검색, 인제스트
 ```
 
 ## 현재 상태
 
-`app/judgment/service.py`는 아직 스텁이다 — 계약 형태(응답 필드)만 맞춰서 반환하고
-실제 RAG 검색/Gemini 추론은 하지 않는다. Spring 쪽 연동 테스트를 먼저 가능하게 하기 위함.
-실제 구현은 별도 작업으로 이어감.
+`app/judgment/service.py`가 실제 RAG 검색 + OpenAI 구조화 출력으로 판정을 수행한다.
+아카이브 검색 결과가 없으면 LLM 호출 없이 바로 NO_EVIDENCE를 반환한다.
 
 ## 아카이브 인제스트
 

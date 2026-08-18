@@ -7,6 +7,11 @@
 실행: python -m app.judgment.rag.ingest
 """
 
+import json
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8")
+
 import mysql.connector
 
 from app.core.settings import settings
@@ -24,11 +29,19 @@ def fetch_archive_items() -> list[dict]:
     try:
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
-            "SELECT id, target, effect, evidence_summary, category_id, trust_level FROM archive_items"
+            """SELECT id, target, effect, evidence_summary, category_id, trust_level,
+                      evidence_source_type, evidence_sources_json
+               FROM archive_items"""
         )
         return cursor.fetchall()
     finally:
         conn.close()
+
+
+def _sources_json(raw) -> str:
+    if isinstance(raw, (list, dict)):
+        return json.dumps(raw, ensure_ascii=False)
+    return raw or "[]"
 
 
 def run() -> None:
@@ -39,8 +52,12 @@ def run() -> None:
     metadatas = [
         {
             "archive_item_id": item["id"],
+            "target": item["target"],
+            "effect": item["effect"],
             "category_id": item["category_id"],
             "trust_level": item["trust_level"],
+            "evidence_source_type": item.get("evidence_source_type") or "",
+            "sources_json": _sources_json(item.get("evidence_sources_json")),
         }
         for item in items
     ]
