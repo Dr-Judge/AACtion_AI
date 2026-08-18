@@ -1,6 +1,6 @@
 import json
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.judgment.prompt import SYSTEM_PROMPT, build_user_prompt
 from app.judgment.rag.retriever import search_archive
@@ -25,17 +25,15 @@ def _detect_conflict_by_keyword(text: str) -> ConflictOfInterest:
     return ConflictOfInterest(detected=False, type=None, description=None)
 
 
-# LLM 구조화 출력 전용 스키마. sources/guide_card.source_type 같은 "사실값"은
-# 여기 포함하지 않는다 — 할루시네이션 방지를 위해 검색된 근거의 DB 값을 그대로 쓴다.
+# LLM 구조화 출력 전용 스키마. sources/guide_card.source_type 같은 "사실값"과
+# 이해상충 판단(입력 원문만으로 결정론적으로 판단하는 게 정책)은 여기 포함하지 않는다 —
+# 할루시네이션 방지 + 근거 유무에 따라 이해상충 결과가 달라지는 모순을 막기 위함.
 class LlmJudgmentOutput(BaseModel):
     trust_level: str
     evidence_summary: str
     primary_archive_item_id: int | None
     guide_card_title: str
     guide_card_tips: list[str]
-    conflict_detected: bool
-    conflict_type: str | None
-    conflict_description: str | None
     safety_notice: str | None
 
 
@@ -70,7 +68,18 @@ def _parse_sources(sources_json: str) -> list[Source]:
         raw = json.loads(sources_json or "[]")
     except (json.JSONDecodeError, TypeError):
         return []
-    return [Source(**s) for s in raw if s.get("title")]
+    if not isinstance(raw, list):
+        return []
+
+    sources = []
+    for item in raw:
+        if not isinstance(item, dict) or not item.get("title"):
+            continue
+        try:
+            sources.append(Source(**item))
+        except ValidationError:
+            continue
+    return sources
 
 
 async def judge(request: JudgmentRequest) -> JudgmentResponse:
@@ -102,11 +111,7 @@ async def judge(request: JudgmentRequest) -> JudgmentResponse:
     return JudgmentResponse(
         trust_level=trust_level,
         evidence_summary=result.evidence_summary,
-        conflict_of_interest=ConflictOfInterest(
-            detected=result.conflict_detected,
-            type=result.conflict_type if result.conflict_detected else None,
-            description=result.conflict_description if result.conflict_detected else None,
-        ),
+        conflict_of_interest=_detect_conflict_by_keyword(request.text),
         safety_notice=safety_notice,
         sources=sources,
         guide_card=GuideCard(
