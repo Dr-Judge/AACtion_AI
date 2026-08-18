@@ -45,3 +45,7 @@ app/
 ```bash
 python -m app.judgment.rag.ingest
 ```
+
+⚠️ 이전에 Gemini 임베딩으로 `data/chroma`를 이미 생성해둔 상태라면(임베딩 전환 이전 커밋을
+쓰던 로컬 환경), 임베딩 차원이 달라서 그대로 인제스트하면 실패한다. `data/chroma` 디렉토리를
+삭제하고 다시 실행할 것.

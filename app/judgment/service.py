@@ -9,6 +9,21 @@ from app.llm.openai_client import get_chat_model
 
 TRUST_LEVELS = ("CLINICAL_EVIDENCE", "EXPERT_OPINION", "PENDING", "NO_EVIDENCE", "COUNTER_EVIDENCE")
 
+# 근거 문서 유무와 무관하게 입력 원문만으로 판단 가능한 협찬/제휴마케팅 고지 신호.
+# LLM 호출 없이도(NO_EVIDENCE 경로 포함) 항상 검사해야 한다.
+_SPONSORSHIP_KEYWORDS = ("쿠팡파트너스", "협찬", "제공받아 작성", "제공받은 원고", "유료광고", "체험단")
+
+
+def _detect_conflict_by_keyword(text: str) -> ConflictOfInterest:
+    for kw in _SPONSORSHIP_KEYWORDS:
+        if kw in text:
+            return ConflictOfInterest(
+                detected=True,
+                type="SPONSORSHIP_DISCLOSURE",
+                description=f"입력 텍스트에 협찬/제휴마케팅 고지로 보이는 표현('{kw}')이 포함되어 있습니다.",
+            )
+    return ConflictOfInterest(detected=False, type=None, description=None)
+
 
 # LLM 구조화 출력 전용 스키마. sources/guide_card.source_type 같은 "사실값"은
 # 여기 포함하지 않는다 — 할루시네이션 방지를 위해 검색된 근거의 DB 값을 그대로 쓴다.
@@ -24,12 +39,12 @@ class LlmJudgmentOutput(BaseModel):
     safety_notice: str | None
 
 
-def _no_evidence_response() -> JudgmentResponse:
+def _no_evidence_response(claim: str) -> JudgmentResponse:
     return JudgmentResponse(
         trust_level="NO_EVIDENCE",
         evidence_summary="현재 아카이브에서 이 주장과 관련된 근거 문서를 찾지 못했습니다. "
         "근거가 없다는 뜻이 아니라, 아직 충분히 확인되지 않았다는 의미입니다.",
-        conflict_of_interest=ConflictOfInterest(detected=False, type=None, description=None),
+        conflict_of_interest=_detect_conflict_by_keyword(claim),
         safety_notice="관련 근거가 아직 확인되지 않았습니다. 정확한 판단을 위해 전문가와 상담하세요.",
         sources=[],
         guide_card=GuideCard(
@@ -61,7 +76,7 @@ def _parse_sources(sources_json: str) -> list[Source]:
 async def judge(request: JudgmentRequest) -> JudgmentResponse:
     candidates = search_archive(request.text, request.category_id, k=3)
     if not candidates:
-        return _no_evidence_response()
+        return _no_evidence_response(request.text)
 
     model = get_chat_model().with_structured_output(LlmJudgmentOutput)
     result: LlmJudgmentOutput = await model.ainvoke(
