@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from pydantic import BaseModel, ValidationError
@@ -83,7 +84,7 @@ def _parse_sources(sources_json: str) -> list[Source]:
 
 
 async def judge(request: JudgmentRequest) -> JudgmentResponse:
-    candidates = search_archive(request.text, request.category_id, k=3)
+    candidates = await asyncio.to_thread(search_archive, request.text, request.category_id, k=3)
     if not candidates:
         return _no_evidence_response(request.text)
 
@@ -98,7 +99,12 @@ async def judge(request: JudgmentRequest) -> JudgmentResponse:
     trust_level = result.trust_level if result.trust_level in TRUST_LEVELS else "NO_EVIDENCE"
     primary = _find_candidate(candidates, result.primary_archive_item_id)
 
-    sources = _parse_sources(primary["metadata"]["sources_json"]) if primary else []
+    # LLM이 evidence 기반 등급을 주장하면서 실제 후보와 매칭이 안 되면(프롬프트 위반),
+    # 근거 없이 높은 신뢰도만 표시되는 모순을 막기 위해 안전하게 NO_EVIDENCE로 대체한다.
+    if trust_level != "NO_EVIDENCE" and primary is None:
+        return _no_evidence_response(request.text)
+
+    sources = _parse_sources(primary["metadata"].get("sources_json", "[]")) if primary else []
     source_type = (primary["metadata"].get("evidence_source_type") or "일반 안내") if primary else "일반 안내"
     source_ref = (
         f"{primary['metadata'].get('target', '')} {primary['metadata'].get('effect', '')}".strip()
