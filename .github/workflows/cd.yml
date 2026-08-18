@@ -1,0 +1,39 @@
+name: CD
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute image name
+        id: image
+        run: echo "name=${{ secrets.DOCKERHUB_USERNAME }}/aaction_ai" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0 — 시크릿 다루는 서드파티 액션이라 SHA 고정
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.name }}:latest
+
+  deploy:
+    needs: build-and-push
+    # 가비아 클라우드(해커톤 지원, 8/28까지 한시적) 서버에 등록한 러너.
+    # Dr-Judge의 ec2-prod 러너와는 별개 — AI 서비스만 이 서버에 단독으로 뜬다.
+    runs-on: [self-hosted, gabia-ai]
+    steps:
+      - name: Pull & restart
+        run: |
+          cd ~/aaction_ai
+          docker compose -f compose.prod.yml pull
+          docker compose -f compose.prod.yml up -d

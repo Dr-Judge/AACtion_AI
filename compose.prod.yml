@@ -1,0 +1,23 @@
+# 가비아 클라우드(해커톤 지원, 8/28까지 한시적) 단독 서버에서 AI 서비스만 띄운다.
+# Dr-Judge(Spring)는 다른 서버(AWS EC2)에 있고, AI_SERVICE_BASE_URL로 이 서버의
+# 공인 IP를 가리키게 설정한다.
+services:
+  ai-service:
+    image: hyunj11/aaction_ai:latest
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      CHROMA_PERSIST_DIR: /app/data/chroma
+    volumes:
+      - ai_chroma_data:/app/data/chroma
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  ai_chroma_data:
