@@ -6,6 +6,12 @@ on:
 permissions:
   contents: read
 
+# 겹치는 배포가 순서 뒤바뀌어 실행되어도(느린 이전 배포가 나중에 끝나서) 최신 배포를
+# 덮어쓰지 않도록 직렬화한다.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -20,11 +26,13 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5 — 로그인 이후 실행되고 자격증명에 접근 가능한 서드파티 액션이라 SHA 고정
         with:
           context: .
           push: true
-          tags: ${{ steps.image.outputs.name }}:latest
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
 
   deploy:
     needs: build-and-push
@@ -32,8 +40,14 @@ jobs:
     # Dr-Judge의 ec2-prod 러너와는 별개 — AI 서비스만 이 서버에 단독으로 뜬다.
     runs-on: [self-hosted, gabia-ai]
     steps:
-      - name: Pull & restart
+      # 러너 로컬에 미리 둔 파일이 아니라, 이 커밋 시점의 compose.prod.yml을 그대로 사용한다
+      # (수동으로 올려둔 옛날 파일이 계속 쓰이는 걸 방지).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pull & restart (커밋 SHA로 고정된 이미지, healthy 될 때까지 대기)
+        env:
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          cd ~/aaction_ai
-          docker compose -f compose.prod.yml pull
-          docker compose -f compose.prod.yml up -d
+          docker compose -f compose.prod.yml --env-file ~/aaction_ai/.env pull
+          docker compose -f compose.prod.yml --env-file ~/aaction_ai/.env up -d --wait --wait-timeout 60

@@ -3,7 +3,7 @@
 # 공인 IP를 가리키게 설정한다.
 services:
   ai-service:
-    image: hyunj11/aaction_ai:latest
+    image: hyunj11/aaction_ai:${IMAGE_TAG:-latest}
     restart: always
     ports:
       - "8000:8000"
