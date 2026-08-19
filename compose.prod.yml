@@ -11,6 +11,13 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       CHROMA_PERSIST_DIR: /app/data/chroma
+      # 인제스트 배치(ingest.py, sync_archive_csv.py)가 Dr-Judge 운영 MySQL(AWS EC2)을
+      # 직접 읽어야 해서 필요 — 실시간 요청 경로는 이 값들을 안 쓴다(docs/AI_SERVICE_CONTRACT.md 5번).
+      MYSQL_HOST: ${MYSQL_HOST:-}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-}
     volumes:
       - ai_chroma_data:/app/data/chroma
     healthcheck:
