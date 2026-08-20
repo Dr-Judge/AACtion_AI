@@ -27,6 +27,7 @@ class GuideCard(BaseModel):
 
 
 class JudgmentResponse(BaseModel):
+    title: str
     trust_level: str
     evidence_summary: str
     conflict_of_interest: ConflictOfInterest

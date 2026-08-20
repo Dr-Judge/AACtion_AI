@@ -30,6 +30,7 @@ def _detect_conflict_by_keyword(text: str) -> ConflictOfInterest:
 # 이해상충 판단(입력 원문만으로 결정론적으로 판단하는 게 정책)은 여기 포함하지 않는다 —
 # 할루시네이션 방지 + 근거 유무에 따라 이해상충 결과가 달라지는 모순을 막기 위함.
 class LlmJudgmentOutput(BaseModel):
+    title: str
     trust_level: str
     evidence_summary: str
     primary_archive_item_id: int | None
@@ -38,8 +39,23 @@ class LlmJudgmentOutput(BaseModel):
     safety_notice: str | None
 
 
+_TITLE_MAX_LEN = 40
+
+
+def _fallback_title(claim: str) -> str:
+    # 아카이브에 후보가 아예 없어 LLM을 호출하지 않는 경로라, 별도 LLM 호출 없이
+    # 원문을 다듬어 제목처럼 보이게 만든다 (완벽한 의문문 재구성은 아니지만
+    # 판정 이력에 빈 제목이 뜨는 것보단 낫다).
+    text = claim.strip().splitlines()[0].strip() if claim.strip() else "이 주장"
+    text = text.rstrip("?!.  ")
+    if len(text) > _TITLE_MAX_LEN:
+        text = text[:_TITLE_MAX_LEN].rstrip() + "..."
+    return f"{text}?"
+
+
 def _no_evidence_response(claim: str) -> JudgmentResponse:
     return JudgmentResponse(
+        title=_fallback_title(claim),
         trust_level="NO_EVIDENCE",
         evidence_summary="현재 아카이브에서 이 주장과 관련된 근거 문서를 찾지 못했습니다. "
         "근거가 없다는 뜻이 아니라, 아직 충분히 확인되지 않았다는 의미입니다.",
@@ -115,6 +131,7 @@ async def judge(request: JudgmentRequest) -> JudgmentResponse:
     safety_notice = result.safety_notice if trust_level in ("PENDING", "NO_EVIDENCE") else None
 
     return JudgmentResponse(
+        title=result.title,
         trust_level=trust_level,
         evidence_summary=result.evidence_summary,
         conflict_of_interest=_detect_conflict_by_keyword(request.text),

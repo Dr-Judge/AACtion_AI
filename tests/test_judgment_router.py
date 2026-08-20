@@ -19,6 +19,7 @@ def test_인증_통과하면_판정_계약대로_응답한다(monkeypatch):
     assert response.status_code == 200
 
     body = response.json()
+    assert body["title"]
     assert body["trust_level"] in {
         "CLINICAL_EVIDENCE",
         "EXPERT_OPINION",
