@@ -3,7 +3,12 @@ import json
 
 from pydantic import BaseModel, ValidationError
 
-from app.judgment.prompt import SYSTEM_PROMPT, build_user_prompt
+from app.judgment.prompt import (
+    SYSTEM_PROMPT,
+    TITLE_ONLY_SYSTEM_PROMPT,
+    build_title_only_user_prompt,
+    build_user_prompt,
+)
 from app.judgment.rag.retriever import search_archive
 from app.judgment.schemas import ConflictOfInterest, GuideCard, JudgmentRequest, JudgmentResponse, Source
 from app.llm.openai_client import get_chat_model
@@ -42,10 +47,13 @@ class LlmJudgmentOutput(BaseModel):
 _TITLE_MAX_LEN = 40
 
 
-def _fallback_title(claim: str) -> str:
-    # 아카이브에 후보가 아예 없어 LLM을 호출하지 않는 경로라, 별도 LLM 호출 없이
-    # 원문을 다듬어 제목처럼 보이게 만든다 (완벽한 의문문 재구성은 아니지만
-    # 판정 이력에 빈 제목이 뜨는 것보단 낫다).
+class _TitleOnlyOutput(BaseModel):
+    title: str
+
+
+def _truncated_fallback_title(claim: str) -> str:
+    # _generate_title 자체가 실패했을 때(OpenAI 호출 오류 등)의 최후 수단이라, 완벽한
+    # 의문문 재구성은 아니지만 판정 이력에 빈 제목이 뜨는 것보단 낫다.
     text = claim.strip().splitlines()[0].strip() if claim.strip() else "이 주장"
     text = text.rstrip("?!.  ")
     if len(text) > _TITLE_MAX_LEN:
@@ -53,9 +61,27 @@ def _fallback_title(claim: str) -> str:
     return f"{text}?"
 
 
-def _no_evidence_response(claim: str) -> JudgmentResponse:
+async def _generate_title(claim: str) -> str:
+    # 근거 후보가 없어 본체 LLM 호출을 안 하는 경로(NO_EVIDENCE)에서도, title만은 별도의
+    # 가벼운 LLM 호출로 제대로 생성한다 — 원문(특히 유튜브 스크립트처럼 길고 장황한 텍스트)을
+    # 그냥 잘라 붙이면 지저분한 제목이 나와서, 판정 이력/공유 카드 품질이 들쭉날쭉해진다.
+    try:
+        model = get_chat_model().with_structured_output(_TitleOnlyOutput)
+        result: _TitleOnlyOutput = await model.ainvoke(
+            [
+                ("system", TITLE_ONLY_SYSTEM_PROMPT),
+                ("human", build_title_only_user_prompt(claim)),
+            ]
+        )
+        title = result.title.strip()
+        return title if title else _truncated_fallback_title(claim)
+    except Exception:
+        return _truncated_fallback_title(claim)
+
+
+async def _no_evidence_response(claim: str, title: str | None = None) -> JudgmentResponse:
     return JudgmentResponse(
-        title=_fallback_title(claim),
+        title=title or await _generate_title(claim),
         trust_level="NO_EVIDENCE",
         evidence_summary="현재 아카이브에서 이 주장과 관련된 근거 문서를 찾지 못했습니다. "
         "근거가 없다는 뜻이 아니라, 아직 충분히 확인되지 않았다는 의미입니다.",
@@ -102,7 +128,7 @@ def _parse_sources(sources_json: str) -> list[Source]:
 async def judge(request: JudgmentRequest) -> JudgmentResponse:
     candidates = await asyncio.to_thread(search_archive, request.text, request.category_id, k=3)
     if not candidates:
-        return _no_evidence_response(request.text)
+        return await _no_evidence_response(request.text)
 
     model = get_chat_model().with_structured_output(LlmJudgmentOutput)
     result: LlmJudgmentOutput = await model.ainvoke(
@@ -118,7 +144,9 @@ async def judge(request: JudgmentRequest) -> JudgmentResponse:
     # LLM이 evidence 기반 등급을 주장하면서 실제 후보와 매칭이 안 되면(프롬프트 위반),
     # 근거 없이 높은 신뢰도만 표시되는 모순을 막기 위해 안전하게 NO_EVIDENCE로 대체한다.
     if trust_level != "NO_EVIDENCE" and primary is None:
-        return _no_evidence_response(request.text)
+        # title은 이미 LLM이 생성했으니(result.title) 그대로 재사용 — 굳이 별도
+        # LLM 호출로 다시 만들 필요 없음.
+        return await _no_evidence_response(request.text, title=result.title)
 
     sources = _parse_sources(primary["metadata"].get("sources_json", "[]")) if primary else []
     source_type = (primary["metadata"].get("evidence_source_type") or "일반 안내") if primary else "일반 안내"
