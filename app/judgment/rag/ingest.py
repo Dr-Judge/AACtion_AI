@@ -48,7 +48,12 @@ def run() -> None:
     items = fetch_archive_items()
     store = get_vector_store()
 
-    texts = [f"{item['target']} {item['effect']} {item['evidence_summary']}" for item in items]
+    # 대상·효과(사람들이 검색에 쓰는 이름)를 요약보다 앞서 두 번 넣어, 긴 요약 본문에 묻혀
+    # 짧은 일상어 질문("위고비 살 빠지나요")이 못 찾는 일을 줄인다.
+    texts = [
+        f"{item['target']} {item['effect']}\n{item['target']}: {item['effect']}\n{item['evidence_summary']}"
+        for item in items
+    ]
     metadatas = [
         {
             "archive_item_id": item["id"],
