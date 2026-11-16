@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 
 from pydantic import BaseModel, ValidationError
 
@@ -17,17 +18,67 @@ TRUST_LEVELS = ("CLINICAL_EVIDENCE", "EXPERT_OPINION", "PENDING", "NO_EVIDENCE",
 
 # 근거 문서 유무와 무관하게 입력 원문만으로 판단 가능한 협찬/제휴마케팅 고지 신호.
 # LLM 호출 없이도(NO_EVIDENCE 경로 포함) 항상 검사해야 한다.
-_SPONSORSHIP_KEYWORDS = ("쿠팡파트너스", "협찬", "제공받아 작성", "제공받은 원고", "유료광고", "체험단")
+_SPONSORSHIP_KEYWORDS = (
+    "쿠팡파트너스", "협찬", "제공받아작성", "제공받은원고", "유료광고", "체험단",
+    "광고포함", "원고료", "소정의수수료", "일정액의수수료", "제휴마케팅",
+)
+
+# 구매를 직접 유도하는 '강한 신호' — 하나만 있어도 상업적 의도로 본다.
+# (기획서: 콘텐츠 설명·자막에서 공동구매·협찬·제휴링크 패턴 감지)
+# 매칭은 공백을 모두 제거한 텍스트에서 한다("프로필 링크" == "프로필링크").
+_STRONG_COMMERCIAL_PATTERNS = (
+    (r"공동구매|공구(?:오픈|진행|링크|마감|시작|합니다|해요)", "공동구매"),
+    (r"(?:구매|주문|판매|스토어|제휴|프로필|바이오|최저가|할인)링크", "구매·제휴 링크"),
+    (r"링크(?:클릭|누르|에서구매|통해구매|타고)", "링크 클릭 유도"),
+    (r"프로필(?:에서|참고|확인)", "프로필 링크 유도"),
+    (r"파트너스", "제휴(파트너스) 활동"),
+)
+
+# 단독으로는 약하지만(일반 후기에도 등장) 2개 이상 겹치면 구매 압박으로 본다.
+_WEAK_COMMERCIAL_PATTERNS = (
+    (r"오늘만", "오늘만"),
+    (r"한정(?:수량|판매|특가)", "한정 수량"),
+    (r"선착순", "선착순"),
+    (r"마감임박|품절임박|재고소진", "마감·품절 임박"),
+    (r"타임세일|특가", "특가"),
+    (r"\d+%할인|반값|할인코드|쿠폰", "할인"),
+    (r"1\+1|무료배송|무료증정", "혜택 문구"),
+)
 
 
 def _detect_conflict_by_keyword(text: str) -> ConflictOfInterest:
+    compact = re.sub(r"\s+", "", text)
+
     for kw in _SPONSORSHIP_KEYWORDS:
-        if kw in text:
+        if kw in compact:
             return ConflictOfInterest(
                 detected=True,
                 type="SPONSORSHIP_DISCLOSURE",
-                description=f"입력 텍스트에 협찬/제휴마케팅 고지로 보이는 표현('{kw}')이 포함되어 있습니다.",
+                description=f"협찬·제휴마케팅 고지로 보이는 표현('{kw}')이 포함되어 있어요.",
             )
+
+    for pattern, label in _STRONG_COMMERCIAL_PATTERNS:
+        if re.search(pattern, compact):
+            return ConflictOfInterest(
+                detected=True,
+                type="COMMERCIAL",
+                description=(
+                    f"{label} 등 구매를 유도하는 표현이 포함되어 있어요. "
+                    "판매 목적이 섞였을 수 있으니 후기만 보고 결정하지 마세요."
+                ),
+            )
+
+    weak = [label for pattern, label in _WEAK_COMMERCIAL_PATTERNS if re.search(pattern, compact)]
+    if len(weak) >= 2:
+        return ConflictOfInterest(
+            detected=True,
+            type="COMMERCIAL",
+            description=(
+                f"구매를 재촉하는 표현({', '.join(weak[:3])})이 함께 보여요. "
+                "판매 목적이 섞였을 수 있으니 후기만 보고 결정하지 마세요."
+            ),
+        )
+
     return ConflictOfInterest(detected=False, type=None, description=None)
 
 
